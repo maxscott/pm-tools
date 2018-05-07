@@ -1,11 +1,11 @@
 from backtrader import Strategy, indicators
-SMA = indicators.SimpleMovingAverage
-CrossOver = indicators.CrossOver
+EMA = indicators.ExponentialMovingAverage
 
 class TestStrategy(Strategy):
     params = (
         ('maperiod', 15),
         ('printlog', False),
+        ('ma', { 'name': 'ema', 'func': EMA })
     )
 
     def log(self, txt, dt=None, doprint=False):
@@ -15,17 +15,14 @@ class TestStrategy(Strategy):
             print('%s, %s' % (dt.isoformat(), txt))
 
     def __init__(self):
-        # Keep a reference to the "close" line in the data[0] dataseries
-        self.dataclose = self.datas[0].close
-
         # To keep track of pending orders and buy price/commission
-        self.order = None
-        self.buyprice = None
-        self.buycomm = None
+        self.order = self.buyprice = self.buycomm = None
 
         # Add a MovingAverageSimple indicator
-        self.sma = SMA(self.datas[0], period=self.params.maperiod)
+        self.ma_slow = self.params.ma['func'](self.datas[0], period=self.params.maperiod)
+        self.ma_fast = self.params.ma['func'](self.datas[0], period=round(self.params.maperiod/6))
 
+    # Order placed event
     def notify_order(self, order):
         if order.status in [order.Submitted, order.Accepted]:
             # Buy/Sell order submitted/accepted to/by broker - Nothing to do
@@ -37,62 +34,49 @@ class TestStrategy(Strategy):
             if order.isbuy():
                 self.log(
                     'BUY EXECUTED, Price: %.2f, Cost: %.2f, Comm %.2f' %
-                    (order.executed.price,
-                     order.executed.value,
-                     order.executed.comm))
+                    (order.executed.price, order.executed.value, order.executed.comm))
 
                 self.buyprice = order.executed.price
                 self.buycomm = order.executed.comm
             else:  # Sell
                 self.log('SELL EXECUTED, Price: %.2f, Cost: %.2f, Comm %.2f' %
-                         (order.executed.price,
-                          order.executed.value,
-                          order.executed.comm))
+                         (order.executed.price, order.executed.value, order.executed.comm))
 
             self.bar_executed = len(self)
 
         elif order.status in [order.Canceled, order.Margin, order.Rejected]:
-            self.log('Order Canceled/Margin/Rejected')
+            self.log('Order Canceled/Margin/Rejected' + str(order.status))
 
-        # Write down: no pending order
         self.order = None
 
+    # Trade completed event
     def notify_trade(self, trade):
-        if not trade.isclosed:
-            return
-
+        if not trade.isclosed: return
         self.log('OPERATION PROFIT, GROSS %.2f, NET %.2f' %
                  (trade.pnl, trade.pnlcomm))
 
+    # On each data event
     def next(self):
         # Simply log the closing price of the series from the reference
-        self.log('Close, %.2f' % self.dataclose[0])
+        self.log('Close, %.2f' % self.datas[0].close[0])
 
         # Check if an order is pending ... if yes, we cannot send a 2nd one
         if self.order:
+            self.log('Pending Order...')
             return
 
-        # Check if we are in the market
-        if not self.position:
+        if self.ma_slow[0] < self.datas[0].close[0]:
+            self.log('BUY SIGNAL, %.2f' % self.datas[0].close[0])
+            self.order = self.buy()
+        elif self.ma_slow[0] > self.datas[0].close[0]:
+            self.log('SELL SIGNAL, %.2f' % self.datas[0].close[0])
+            self.order = self.sell()
 
-            # Not yet ... we MIGHT BUY if ...
-            if self.dataclose[0] > self.sma[0]:
-
-                # BUY, BUY, BUY!!! (with all possible default parameters)
-                self.log('BUY CREATE, %.2f' % self.dataclose[0])
-
-                # Keep track of the created order to avoid a 2nd order
-                self.order = self.buy()
-
-        else:
-
-            if self.dataclose[0] < self.sma[0]:
-                # SELL, SELL, SELL!!! (with all possible default parameters)
-                self.log('SELL CREATE, %.2f' % self.dataclose[0])
-
-                # Keep track of the created order to avoid a 2nd order
-                self.order = self.sell()
+        if not self.position and self.ma_fast[0] < self.datas[0].close[0]:
+            self.log('CATCH THE KNIFE!!!, %.2f' % self.datas[0].close[0])
+            self.order = self.buy()
 
     def stop(self):
-        self.log('(MA Period %2d) Ending Value %.2f' % (self.params.maperiod, self.broker.getvalue()), doprint=True)
+        self.log('({} Period {}) Ending Value {}'.format(self.params.ma['name'],
+            self.params.maperiod, round(self.broker.getvalue())), doprint=True)
 

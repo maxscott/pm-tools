@@ -3,7 +3,8 @@ EMA = indicators.ExponentialMovingAverage
 
 class TestStrategy(Strategy):
     params = (
-        ('maperiod', 15),
+        ('maperiod', 126),
+        ('mafast', 64),
         ('printlog', False),
         ('ma', { 'name': 'ema', 'func': EMA })
     )
@@ -19,8 +20,14 @@ class TestStrategy(Strategy):
         self.order = self.buyprice = self.buycomm = None
 
         # Add a MovingAverageSimple indicator
-        self.ma_slow = self.params.ma['func'](self.datas[0], period=self.params.maperiod)
-        self.ma_fast = self.params.ma['func'](self.datas[0], period=round(self.params.maperiod/6))
+        self.ma = self.params.ma['func'](
+            self.datas[0],
+            period=self.params.maperiod
+        )
+        self.ma_fast = self.params.ma['func'](
+            self.datas[0],
+            period=round(self.params.mafast)
+        )
 
     # Order placed event
     def notify_order(self, order):
@@ -34,13 +41,15 @@ class TestStrategy(Strategy):
             if order.isbuy():
                 self.log(
                     'BUY EXECUTED, Price: %.2f, Cost: %.2f, Comm %.2f' %
-                    (order.executed.price, order.executed.value, order.executed.comm))
+                    (order.executed.price, order.executed.value,
+                        order.executed.comm), doprint=True)
 
                 self.buyprice = order.executed.price
                 self.buycomm = order.executed.comm
             else:  # Sell
                 self.log('SELL EXECUTED, Price: %.2f, Cost: %.2f, Comm %.2f' %
-                         (order.executed.price, order.executed.value, order.executed.comm))
+                         (order.executed.price, order.executed.value,
+                             order.executed.comm), doprint=True)
 
             self.bar_executed = len(self)
 
@@ -57,26 +66,17 @@ class TestStrategy(Strategy):
 
     # On each data event
     def next(self):
-        # Simply log the closing price of the series from the reference
-        self.log('Close, %.2f' % self.datas[0].close[0])
+        close = self.datas[0].close[0]
+        self.log('Close, {}'.format(close))
 
-        # Check if an order is pending ... if yes, we cannot send a 2nd one
-        if self.order:
-            self.log('Pending Order...')
-            return
-
-        if self.ma_slow[0] < self.datas[0].close[0]:
-            self.log('BUY SIGNAL, %.2f' % self.datas[0].close[0])
+        if self.ma[0] < self.ma_fast[0]: # regular strength signal
+            self.log('BUY SIGNAL, %.2f' % close)
             self.order = self.buy()
-        elif self.ma_slow[0] > self.datas[0].close[0]:
-            self.log('SELL SIGNAL, %.2f' % self.datas[0].close[0])
+        elif self.ma_fast[0] < self.ma[0]: # regular sell signal
+            self.log('SELL SIGNAL, %.2f' % close)
             self.order = self.sell()
-
-        if not self.position and self.ma_fast[0] < self.datas[0].close[0]:
-            self.log('CATCH THE KNIFE!!!, %.2f' % self.datas[0].close[0])
-            self.order = self.buy()
+        else: self.order = None
 
     def stop(self):
-        self.log('({} Period {}) Ending Value {}'.format(self.params.ma['name'],
-            self.params.maperiod, round(self.broker.getvalue())), doprint=True)
+        self.log('({} Period {}, Fast {}) Ending Value {}'.format(self.params.ma['name'], self.params.maperiod, self.params.mafast, round(self.broker.getvalue())), doprint=True)
 

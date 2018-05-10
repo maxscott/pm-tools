@@ -8,8 +8,6 @@ import backtrader as bt
 from backtrader import indicators as btind
 from tam_strategy import TestStrategy
 
-SMA = btind.SimpleMovingAverage
-WMA = btind.WeightedMovingAverage
 EMA = btind.ExponentialMovingAverage
 
 MODPATH = os.path.dirname('/users/max/projects/fi/data/tam/')
@@ -18,15 +16,15 @@ F = False
 
 class LongOnly(bt.Sizer):
     def _getsizing(self, comminfo, cash, data, isbuy):
-        # buy max purchase tomorrow if possible
-        if isbuy:
-            try:
-                return math.floor(cash/data.open[1])
-            except:
-                return 0
         # sell total position
-        else:
+        if not isbuy:
             return self.broker.getposition(data).size
+
+        # buy max purchase tomorrow if possible
+        try:
+            return math.floor(cash/data.open[1])
+        except:
+            return math.floor(cash/data.open[0])
 
 # assumes data at `modpath/{name}.csv`
 def load_data(name, fromdate, todate):
@@ -61,7 +59,6 @@ def main():
     args = parse_arguments()
     v = args.verbose
     fromdate, todate = args.start, args.end
-    ma_map = { 'sma': SMA, 'wma': WMA, 'ema': EMA }
 
     # Create a cerebro entity
     cerebro = bt.Cerebro()
@@ -70,9 +67,11 @@ def main():
     if args.ma:
         ma_min, ma_max = [int(a) for a in args.ma]
         marange = range(ma_min, ma_max)
-        matypes = [ {'name':k,'func':v} for k,v in ma_map.items() ]
         strats = cerebro.optstrategy(
-            TestStrategy, ma=matypes, maperiod=marange, mafast=range(50,75), printlog=v)
+            TestStrategy,
+            maperiod=marange,
+            mafast=64,
+            printlog=v)
     elif args.backtest:
         period = args.backtest
         strats = cerebro.addstrategy(TestStrategy, maperiod=period, printlog=v)

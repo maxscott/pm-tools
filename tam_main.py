@@ -11,10 +11,11 @@ from tam_strategy import TestStrategy
 EMA = btind.ExponentialMovingAverage
 
 MODPATH = os.path.dirname('/users/max/projects/fi/data/tam/')
-T = True
-F = False
 
 class LongOnly(bt.Sizer):
+    def __init__(self, args):
+        print(args)
+
     def _getsizing(self, comminfo, cash, data, isbuy):
         # sell total position
         if not isbuy:
@@ -31,6 +32,7 @@ def load_data(name, fromdate, todate):
     datapath = os.path.join(MODPATH, name + '.csv')
     return bt.feeds.GenericCSVData(
         dataname=datapath,
+        name=name,
         fromdate=fromdate,
         todate=todate,
         reverse=False,
@@ -67,23 +69,18 @@ def main():
     if args.ma:
         ma_min, ma_max = [int(a) for a in args.ma]
         marange = range(ma_min, ma_max)
-        strats = cerebro.optstrategy(
-            TestStrategy,
-            maperiod=marange,
-            mafast=64,
-            printlog=v)
+        strats = cerebro.optstrategy(TestStrategy, maperiod=marange, mafast=64, printlog=v)
     elif args.backtest:
         period = args.backtest
         strats = cerebro.addstrategy(TestStrategy, maperiod=period, printlog=v)
     else:
         raise ValueError('Pass either backtest or ma options')
 
-
     for d in ['SPY']:
         cerebro.adddata(load_data(d, fromdate, todate))
 
     cerebro.broker.setcash(10000.0)
-    cerebro.addsizer(LongOnly)
+    cerebro.addsizer(LongOnly, {'SPY': .5, 'BND': .5})
     cerebro.broker.setcommission(commission=0.00)
 
     cerebro.run()
